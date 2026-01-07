@@ -1,11 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
 using NuGet.ProjectModel;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
+using System.Linq;
+using System.Threading.Tasks;
 using Udrea_Carina_Lab2.Data;
 using Udrea_Carina_Lab2.Models;
 
@@ -23,10 +24,7 @@ namespace Udrea_Carina_Lab2.Controllers
         // GET: Books
         public async Task<IActionResult> Index()
         {
-            var books = _context.Book
-    .Include(b => b.Author)
-    .Include(b => b.Genre);
-
+            var books = _context.Book.Include(b => b.Author).Include(b => b.Genre);
             return View(await books.ToListAsync());
         }
 
@@ -37,10 +35,13 @@ namespace Udrea_Carina_Lab2.Controllers
             {
                 return NotFound();
             }
-
             var book = await _context.Book
-                .Include(b => b.Genre)
-                .FirstOrDefaultAsync(m => m.ID == id);
+ .Include(s => s.Orders)
+ .ThenInclude(e => e.Customer)
+ .AsNoTracking()
+ .FirstOrDefaultAsync(m => m.ID == id);
+        
+        
             if (book == null)
             {
                 return NotFound();
@@ -63,15 +64,23 @@ namespace Udrea_Carina_Lab2.Controllers
         // For more details, see http://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create([Bind("ID,Title,Author,Price,GenreID")] Book book)
+        public async Task<IActionResult> Create([Bind("Title,Author,Price")] Book book)
         {
-            if (ModelState.IsValid)
+            try
             {
-                _context.Add(book);
-                await _context.SaveChangesAsync();
-                return RedirectToAction(nameof(Index));
+                if (ModelState.IsValid)
+                {
+                    _context.Add(book);
+                    await _context.SaveChangesAsync();
+                    return RedirectToAction(nameof(Index));
+                }
             }
-            ViewData["GenreID"] = new SelectList(_context.Set<Genre>(), "ID", "ID", "Name");
+            catch (DbUpdateException /* ex*/)
+            {
+
+                ModelState.AddModelError("", "Unable to save changes. " +
+                "Try again, and if the problem persists ");
+            }
             return View(book);
         }
 
@@ -93,38 +102,35 @@ namespace Udrea_Carina_Lab2.Controllers
             return View(book);
         }
 
-       
-        [HttpPost]
+
+        [HttpPost, ActionName("Edit")]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Edit(int id, [Bind("ID,Title,Author,Price,GenreID")] Book book)
+        public async Task<IActionResult> EditPost(int? id)
         {
-            if (id != book.ID)
+            if (id == null)
             {
                 return NotFound();
             }
-
-            if (ModelState.IsValid)
+            var bookToUpdate = await _context.Book.FirstOrDefaultAsync(s => s.ID == id);
+            if (await TryUpdateModelAsync<Book>(
+            bookToUpdate,
+            "",
+            s => s.AuthorID, s => s.Title, s => s.Price, s => s.GenreID))
             {
                 try
                 {
-                    _context.Update(book);
                     await _context.SaveChangesAsync();
+                    return RedirectToAction(nameof(Index));
                 }
-                catch (DbUpdateConcurrencyException)
+                catch (DbUpdateException /* ex */)
                 {
-                    if (!BookExists(book.ID))
-                    {
-                        return NotFound();
-                    }
-                    else
-                    {
-                        throw;
-                    }
+                    ModelState.AddModelError("", "Unable to save changes. " +
+                    "Try again, and if the problem persists");
                 }
-                return RedirectToAction(nameof(Index));
             }
-            ViewData["GenreID"] = new SelectList(_context.Set<Genre>(), "ID", "ID", book.GenreID);
-            return View(book);
+            ViewData["AuthorID"] = new SelectList(_context.Author, "ID", "FullName",
+           bookToUpdate.AuthorID);
+            return View(bookToUpdate);
         }
 
         // GET: Books/Delete/5
